@@ -1,0 +1,65 @@
+import argparse
+import os
+import json
+import sys
+
+from dotenv import load_dotenv
+from openai import OpenAI
+from prompts import system_prompt
+from call_function import available_functions, call_function
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="AI Code Assistant")
+    parser.add_argument("user_prompt", type=str, help="Prompt to send to the LLM")
+    parser.add_argument("--verbose", action="store_true", help="Enable verbose output")
+    args = parser.parse_args()
+
+    load_dotenv()
+    api_key = os.environ.get("OPENROUTER_API_KEY")
+    if not api_key:
+        raise RuntimeError("OPENROUTER_API_KEY environment variable not set")
+
+    client = OpenAI(
+        base_url="https://openrouter.ai/api/v1",
+        api_key=api_key,
+    )
+    messages = [
+        {"role":"system", "content": system_prompt},
+        {"role": "user", "content": args.user_prompt},
+    ]
+    for i in range(10):
+        response = call_openAI(client, messages, available_functions)
+        message = response.choices[0].message
+        messages.append(message)    
+
+        if message.tool_calls:
+            for tool_call in message.tool_calls:
+                result_message = call_function(tool_call, args.verbose)
+                messages.append(result_message)
+                if result_message['content']=="":
+                    raise ValueError("result_message content cannot be empty.")
+                if args.verbose:
+                    print(f"-> {result_message['content']}")
+        else: 
+            break
+        if not response.usage:
+            raise RuntimeError("API response appears to be malformed")
+
+        if args.verbose:
+            print("User prompt:", args.user_prompt)
+            print("Prompt tokens:", response.usage.prompt_tokens)
+            print("Response tokens:", response.usage.completion_tokens)
+        if i == 9:
+            sys.exit("Maximum iterations reached!")
+
+    print("Final Response:", messages[-1].content)
+        
+def call_openAI(client, messages, available_functions):
+    return client.chat.completions.create(
+        model="openrouter/free",
+        messages=messages,
+        tools=available_functions
+    )
+
+if __name__ == "__main__":
+    main()
